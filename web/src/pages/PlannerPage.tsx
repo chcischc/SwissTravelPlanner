@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMustVisitDetail } from "../data/mustVisitDetails";
+import { planTripClient } from "../planner/clientPlanner";
 
 const INTEREST_KEYS = ["nature", "culture", "food", "sport"] as const;
 type InterestKey = (typeof INTEREST_KEYS)[number];
@@ -95,7 +96,7 @@ function labelForCity(slug: string): string {
     .join(" ");
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const API_BASE = (import.meta.env.VITE_API_BASE ?? "").trim();
 const PLAN_STORAGE_KEY = "alpScheduler:lastPlan";
 const PLANNER_INPUTS_KEY = "alpScheduler:lastInputs";
 
@@ -410,19 +411,33 @@ const PlannerPage = () => {
     };
 
     try {
-      const response = await fetch(`${API_BASE}/api/plan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      let data;
+      const useClientPlanner = import.meta.env.PROD && !API_BASE;
+      if (useClientPlanner) {
+        data = await planTripClient(body);
+      } else {
+        try {
+          const response = await fetch(`${API_BASE}/api/plan`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
 
-      if (!response.ok) {
-        const info = await response.json().catch(() => ({}));
-        const message = info.detail || "Unable to generate itinerary. Try different inputs.";
-        throw new Error(message);
+          if (!response.ok) {
+            const info = await response.json().catch(() => ({}));
+            const message = info.detail || "Unable to generate itinerary. Try different inputs.";
+            throw new Error(message);
+          }
+
+          data = await response.json();
+        } catch (error) {
+          if (!API_BASE) {
+            data = await planTripClient(body);
+          } else {
+            throw error;
+          }
+        }
       }
-
-      const data = await response.json();
       sessionStorage.setItem(PLAN_STORAGE_KEY, JSON.stringify(data));
       // persist current inputs for Adjust Preferences
       sessionStorage.setItem(
